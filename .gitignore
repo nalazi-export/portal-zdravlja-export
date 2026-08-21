@@ -1,0 +1,22 @@
+# --- Never commit anything below: these hold medical records or credentials ---
+nalazi/
+*.pdf
+manifest.json
+*.scope
+*.har
+*.saz
+cookies.txt
+cookie.txt
+pz_cookie.txt
+*.jsonlz4
+
+# PyInstaller
+build/
+dist/
+*.spec
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/

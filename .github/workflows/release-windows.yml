@@ -1,0 +1,72 @@
+name: release-windows
+
+# Tag a commit to publish, e.g.  git tag v1.0.0 && git push origin v1.0.0
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write       # create the release and upload the asset
+  id-token: write       # sign the build provenance
+  attestations: write   # record the provenance attestation
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt pyinstaller
+
+      # pz_cookie is imported inside a function, so PyInstaller's static
+      # analysis does not see it. Without the hidden import the exe builds
+      # fine and then fails at runtime with no way to read a cookie.
+      - name: Build the executable
+        run: >
+          pyinstaller --onefile --console
+          --name portal-zdravlja-export
+          --hidden-import pz_cookie
+          --collect-submodules lz4
+          pz_download.py
+
+      - name: Verify the executable actually runs
+        run: |
+          dist\portal-zdravlja-export.exe --help
+          if ($LASTEXITCODE -ne 0) { throw "exe failed to run" }
+
+      # Ties the binary to this exact commit and workflow, so anyone can verify
+      # where it came from with: gh attestation verify <exe> --repo <owner/repo>
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/portal-zdravlja-export.exe
+
+      - name: Upload as a workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: portal-zdravlja-export-windows
+          path: dist/portal-zdravlja-export.exe
+
+      # Workflow artifacts expire and need a GitHub login to download, so the
+      # release asset is what end users actually get.
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          NOTES=$'Windows executable, no Python installation required.\n\nWindows will warn that the file is unsigned ("Windows protected your PC"): choose More info, then Run anyway. Signing certificates cost money and this project has none.\n\nTo verify the binary was built from this repository:\n\n    gh attestation verify portal-zdravlja-export.exe --repo '"${GITHUB_REPOSITORY}"$'\n\nIf you would rather not run an unsigned executable, use the Python scripts instead. See the README.'
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/portal-zdravlja-export.exe --clobber
+          else
+            gh release create "$TAG" dist/portal-zdravlja-export.exe \
+              --title "$TAG" --notes "$NOTES"
+          fi

@@ -1,0 +1,42 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Byte-compile both scripts
+        run: python -m compileall -q pz_download.py pz_cookie.py
+      - name: Smoke-test the CLI
+        run: |
+          python pz_download.py --help > /dev/null
+          python pz_cookie.py --help > /dev/null
+      - name: Cookie parsing accepts every documented input shape
+        run: |
+          python - <<'PY'
+          from pz_download import clean_cookie_text as c
+          want = "JSESSIONID_PZ=ABC"
+          cases = {
+            "bare":            "JSESSIONID_PZ=ABC; subjectId=xyz",
+            "header line":     "Cookie: JSESSIONID_PZ=ABC",
+            "header block":    "GET / HTTP/1.1\nHost: portal.zdravlje.hr\nCookie: JSESSIONID_PZ=ABC\n",
+            "netscape":        "portal.zdravlje.hr\tFALSE\t/\tTRUE\t0\tJSESSIONID_PZ\tABC",
+            "netscape httponly": "#HttpOnly_portal.zdravlje.hr\tFALSE\t/\tTRUE\t0\tJSESSIONID_PZ\tABC",
+          }
+          bad = [k for k, v in cases.items() if want not in c(v)]
+          assert not bad, f"failed to parse: {bad}"
+          print(f"all {len(cases)} cookie input shapes parse correctly")
+          PY
